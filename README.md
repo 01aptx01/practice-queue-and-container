@@ -82,6 +82,18 @@ Flushes the task history from the Redis store.
 - **Endpoint**: `DELETE /tasks`
 - **Response**: `200 OK`
 
+## Load Testing
+The project includes **Locust** to simulate high traffic and test the queue's resilience.
+
+1. **Access Locust Web UI:**
+   Navigate to `http://localhost:8089` in your browser.
+2. **Configure Load Test:**
+   - **Number of users:** e.g., 100
+   - **Spawn rate:** e.g., 10 (users added per second)
+   - **Host:** `http://api:5000` (pre-filled by docker environment)
+3. **Start & Monitor:**
+   Click "Start swarming". Open the Telemetry Console (`http://localhost:3000`) side-by-side to observe the active tasks spike and how Celery processes the backlog.
+
 ## Directory Structure
 ```text
 .
