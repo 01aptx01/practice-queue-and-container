@@ -7,8 +7,9 @@ import redis
 import datetime
 import json
 import os
+import time
 from celery.result import AsyncResult
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response, current_app
 from .tasks import simulate_heavy_computation
 
 tasks_bp = Blueprint('tasks', __name__, url_prefix='/tasks')
@@ -45,19 +46,20 @@ def submit_task():
         "message": f"Task submitted to sleep for {duration} seconds"
     }), 202
 
-@tasks_bp.route('', methods=['GET'])
-def get_recent_tasks():
-    """
-    Retrieves the statuses and metadata of the 50 most recent tasks.
-    """
-    # Fetch the last 50 task IDs from Redis
+def _get_tasks_data():
+    """Helper function to fetch and format task data optimally."""
     task_ids = redis_client.lrange('recent_tasks', 0, 49)
-    tasks = []
-    
-    for task_id in task_ids:
-        # Retrieve custom metadata (start time, duration)
-        meta = redis_client.hgetall(f'task_meta:{task_id}')
+    if not task_ids:
+        return []
         
+    # Use pipeline to batch hgetall queries
+    pipeline = redis_client.pipeline()
+    for task_id in task_ids:
+        pipeline.hgetall(f'task_meta:{task_id}')
+    meta_results = pipeline.execute()
+    
+    tasks = []
+    for task_id, meta in zip(task_ids, meta_results):
         # Retrieve the current state from Celery's result backend
         result = AsyncResult(task_id)
         status = result.state
@@ -77,23 +79,48 @@ def get_recent_tasks():
             "duration": meta.get("duration", "-"),
             "result": payload
         })
-        
+    return tasks
+
+@tasks_bp.route('', methods=['GET'])
+def get_recent_tasks():
+    """
+    Retrieves the statuses and metadata of the 50 most recent tasks.
+    """
+    tasks = _get_tasks_data()
     return jsonify(tasks), 200
+
+@tasks_bp.route('/stream', methods=['GET'])
+def stream_tasks():
+    """
+    SSE endpoint to push task queue updates to the client in real-time.
+    """
+    def generate():
+        while True:
+            tasks = _get_tasks_data()
+            yield f"data: {json.dumps(tasks)}\n\n"
+            time.sleep(2)
+            
+    return Response(generate(), mimetype='text/event-stream')
 
 @tasks_bp.route('', methods=['DELETE'])
 def clear_tasks():
     """
     Clears all tracked tasks and their metadata from Redis.
-    Note: This does not stop tasks currently executing in Celery, but clears the monitoring UI.
+    Also revokes any executing tasks in Celery.
     """
     # Retrieve all tracked task IDs
     task_ids = redis_client.lrange('recent_tasks', 0, -1)
     
-    # Remove metadata keys for each task
+    # Get celery app instance
+    celery_app = current_app.extensions["celery"]
+    
+    # Remove metadata keys and revoke tasks
     for task_id in task_ids:
+        # Revoke the task (terminate if already running)
+        celery_app.control.revoke(task_id, terminate=True)
         redis_client.delete(f'task_meta:{task_id}')
         
     # Remove the tracking list itself
     redis_client.delete('recent_tasks')
     
-    return jsonify({"status": "success", "message": "All task tracking records cleared"}), 200
+    return jsonify({"status": "success", "message": "All task tracking records cleared and tasks revoked"}), 200

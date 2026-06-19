@@ -27,30 +27,29 @@ export default function Dashboard() {
   const { status: triggerStatus, taskId: triggeredTaskId, triggerTask } = useTaskStatus();
 
   /**
-   * Fetches the latest task queue data from the backend API.
-   * Runs on mount and via interval polling.
-   */
-  const fetchTasks = async () => {
-    try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
-      const res = await fetch(`${apiUrl}/tasks`);
-      if (res.ok) {
-        const data = await res.json();
-        setTasks(data);
-      }
-    } catch (err) {
-      console.error("Failed to fetch tasks", err);
-    }
-  };
-
-  /**
-   * Effect hook to initialize data fetching and setup a polling interval.
-   * Polls every 2000 milliseconds (2 seconds) for the dashboard view.
+   * Effect hook to establish SSE connection for real-time task updates.
    */
   useEffect(() => {
-    fetchTasks();
-    const interval = setInterval(fetchTasks, 2000);
-    return () => clearInterval(interval); // Cleanup on unmount
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+    const eventSource = new EventSource(`${apiUrl}/tasks/stream`);
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        setTasks(data);
+      } catch (err) {
+        console.error("Failed to parse SSE data", err);
+      }
+    };
+
+    eventSource.onerror = (error) => {
+      console.error("SSE Error:", error);
+      eventSource.close();
+    };
+
+    return () => {
+      eventSource.close(); // Cleanup on unmount
+    };
   }, []);
 
   // Calculate dynamic metrics for the top cards
