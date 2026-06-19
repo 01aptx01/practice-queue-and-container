@@ -22,6 +22,7 @@ export default function Dashboard() {
   // Global Tasks State for the Table
   const [tasks, setTasks] = useState<Task[]>([]);
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
+  const [isConnected, setIsConnected] = useState<boolean>(false);
 
   // Hook for triggering specific tasks from the UI
   const { status: triggerStatus, taskId: triggeredTaskId, triggerTask } = useTaskStatus();
@@ -33,6 +34,10 @@ export default function Dashboard() {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
     const eventSource = new EventSource(`${apiUrl}/tasks/stream`);
 
+    eventSource.onopen = () => {
+      setIsConnected(true);
+    };
+
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
@@ -43,8 +48,10 @@ export default function Dashboard() {
     };
 
     eventSource.onerror = (error) => {
-      console.error("SSE Error:", error);
-      eventSource.close();
+      console.error("SSE Error (reconnecting...):", error);
+      setIsConnected(false);
+      // We explicitly DO NOT call eventSource.close() here 
+      // so the browser's native auto-reconnect handles it.
     };
 
     return () => {
@@ -116,7 +123,10 @@ export default function Dashboard() {
       {/* Header Section */}
       <header className="mb-8 border-b border-[#30363d] pb-4 flex justify-between items-end">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white mb-1">Telemetry Console</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-white mb-1 flex items-center">
+            Telemetry Console
+            {!isConnected && <span className="ml-3 text-xs px-2 py-0.5 bg-[#ff7b72]/10 text-[#ff7b72] border border-[#ff7b72]/30 rounded animate-pulse tracking-wide font-medium">Reconnecting...</span>}
+          </h1>
           <p className="text-sm text-[#8b949e]">Real-time async task queue monitoring</p>
         </div>
         <div className="flex gap-4 items-center">

@@ -1,6 +1,11 @@
 version: '3.8'
 
 services:
+  # ---------------------------------------------------------
+  # Redis: Acts as the central message broker and metadata database
+  # - db=0 is used by Celery for task routing and results
+  # - db=1 is used by the API to store task execution history
+  # ---------------------------------------------------------
   redis:
     image: redis:7-alpine
     ports:
@@ -11,10 +16,15 @@ services:
       timeout: 3s
       retries: 5
 
+  # ---------------------------------------------------------
+  # API: The Flask backend running via Gunicorn
+  # Handles all incoming REST requests and streams SSE events
+  # ---------------------------------------------------------
   api:
     build: 
       context: .
       dockerfile: Dockerfile
+    command: gunicorn --worker-class gthread --workers 4 --threads 50 --bind 0.0.0.0:5000 run:app
     ports:
       - "5000:5000"
     environment:
@@ -24,6 +34,10 @@ services:
       redis:
         condition: service_healthy
 
+  # ---------------------------------------------------------
+  # Worker: The Celery consumer
+  # Listens to the Redis broker and executes tasks in the background
+  # ---------------------------------------------------------
   worker:
     build:
       context: .
@@ -36,6 +50,10 @@ services:
       redis:
         condition: service_healthy
 
+  # ---------------------------------------------------------
+  # Frontend: Next.js Telemetry Console
+  # Serves the real-time React dashboard
+  # ---------------------------------------------------------
   frontend:
     build:
       context: ./frontend
@@ -47,6 +65,10 @@ services:
     depends_on:
       - api
 
+  # ---------------------------------------------------------
+  # Locust: Load Testing Framework
+  # Simulates high traffic (POST/GET) to stress test the API and Queue
+  # ---------------------------------------------------------
   locust:
     image: locustio/locust
     ports:
@@ -59,6 +81,10 @@ services:
     depends_on:
       - api
 
+  # ---------------------------------------------------------
+  # Flower: Celery Monitoring Dashboard
+  # Provides administrative insight into worker nodes and task history
+  # ---------------------------------------------------------
   flower:
     build: 
       context: .
