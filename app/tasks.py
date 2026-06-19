@@ -6,8 +6,12 @@ Defines all asynchronous tasks that are executed by the Celery worker.
 from celery import shared_task
 import time
 
-@shared_task(ignore_result=False)
-def simulate_heavy_computation(duration: int):
+@shared_task(bind=True, 
+    ignore_result=False, 
+    autoretry_for=(Exception,),
+    retry_kwargs={'max_retries': 3, 'countdown': 5}
+)
+def simulate_heavy_computation(self, duration: int):
     """
     Simulates a heavy computation or long-running process by sleeping.
     
