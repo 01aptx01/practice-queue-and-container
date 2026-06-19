@@ -94,6 +94,16 @@ The project includes **Locust** to simulate high traffic and test the queue's re
 3. **Start & Monitor:**
    Click "Start swarming". Open the Telemetry Console (`http://localhost:3000`) side-by-side to observe the active tasks spike and how Celery processes the backlog.
 
+## Celery Monitoring (Flower)
+For production-grade monitoring of the Celery queues, this project includes **Flower**.
+
+1. **Access Flower Web UI:**
+   Navigate to `http://localhost:5555` in your browser.
+2. **Features Available:**
+   - Real-time graphs for task execution rates.
+   - Comprehensive list of all tasks (Pending, Started, Success, Failed) without being limited to the latest 50.
+   - Advanced filtering, searching by Task ID, and remote control over workers (e.g., Revoking tasks manually).
+
 ## Directory Structure
 ```text
 .
