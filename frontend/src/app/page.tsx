@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { io } from "socket.io-client";
 import { useTaskStatus } from "../hooks/useTaskStatus";
 
 // Define the structure of a Task object returned from the API
@@ -53,35 +54,33 @@ export default function Dashboard() {
    */
   useEffect(() => {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
-    const eventSource = new EventSource(`${apiUrl}/tasks/stream?limit=${limit}`);
+    const socket = io(apiUrl);
 
-    eventSource.onopen = () => {
+    socket.on('connect', () => {
       setIsConnected(true);
-    };
+    });
 
-    eventSource.onmessage = (event) => {
+    socket.on('task_update', (data: any) => {
       try {
-        const data = JSON.parse(event.data);
         if (data.metrics && data.tasks) {
-          setTasks(data.tasks);
+          // Slice the broadcasted data to respect the local limit setting
+          const slicedTasks = data.tasks.slice(0, limit);
+          setTasks(slicedTasks);
           setMetrics(data.metrics);
         } else {
-          setTasks(Array.isArray(data) ? data : []);
+          setTasks(Array.isArray(data) ? data.slice(0, limit) : []);
         }
       } catch (err) {
-        console.error("Failed to parse SSE data", err);
+        console.error("Failed to process Socket data", err);
       }
-    };
+    });
 
-    eventSource.onerror = (error) => {
-      console.error("SSE Error (reconnecting...):", error);
+    socket.on('disconnect', () => {
       setIsConnected(false);
-      // We explicitly DO NOT call eventSource.close() here 
-      // so the browser's native auto-reconnect handles it.
-    };
+    });
 
     return () => {
-      eventSource.close(); // Cleanup on unmount
+      socket.disconnect(); // Cleanup on unmount
     };
   }, [limit]);
 

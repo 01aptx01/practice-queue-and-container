@@ -9,6 +9,7 @@ import os
 from dotenv import load_dotenv
 
 from .celery_utils import celery_init_app
+from .extensions import socketio
 from .routes import tasks_bp
 
 # Load environment variables from .env file if present
@@ -43,5 +44,7 @@ def create_app() -> Flask:
     
     # Register API routes
     app.register_blueprint(tasks_bp)
+    
+    socketio.init_app(app)
     
     return app

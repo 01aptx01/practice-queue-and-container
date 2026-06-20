@@ -7,10 +7,13 @@ import redis
 import datetime
 import json
 import os
+import os
 import time
+import threading
 from celery.result import AsyncResult
-from flask import Blueprint, request, jsonify, Response, current_app
+from flask import Blueprint, request, jsonify, current_app
 from .tasks import simulate_heavy_computation
+from .extensions import socketio
 
 tasks_bp = Blueprint('tasks', __name__, url_prefix='/tasks')
 
@@ -168,20 +171,23 @@ def get_task_status(task_id):
         "result": payload
     }), 200
 
-@tasks_bp.route('/stream', methods=['GET'])
-def stream_tasks():
-    """
-    SSE endpoint to push task queue updates to the client in real-time.
-    """
-    limit = _parse_limit(request)
-    
-    def generate():
-        while True:
-            tasks = _get_tasks_data(limit=limit)
-            yield f"data: {json.dumps(tasks)}\n\n"
-            time.sleep(2)
-            
-    return Response(generate(), mimetype='text/event-stream')
+thread = None
+thread_lock = threading.Lock()
+
+def background_thread():
+    """Background task to broadcast task updates to all connected clients."""
+    while True:
+        socketio.sleep(2)
+        # Broadcast up to 100 tasks. The frontend can slice them based on user limit.
+        tasks = _get_tasks_data(limit=100)
+        socketio.emit('task_update', tasks)
+
+@socketio.on('connect')
+def handle_connect():
+    global thread
+    with thread_lock:
+        if thread is None:
+            thread = socketio.start_background_task(background_thread)
 
 @tasks_bp.route('', methods=['DELETE'])
 def clear_tasks():
