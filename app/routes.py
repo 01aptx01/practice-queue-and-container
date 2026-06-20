@@ -50,9 +50,9 @@ def submit_task():
         "message": f"Task submitted to sleep for {duration} seconds"
     }), 202
 
-def _get_tasks_data():
+def _get_tasks_data(limit=50):
     """Helper function to fetch and format task data optimally."""
-    task_ids = redis_client.lrange('recent_tasks', 0, 49)
+    task_ids = redis_client.lrange('recent_tasks', 0, limit - 1)
     if not task_ids:
         return []
         
@@ -114,9 +114,10 @@ def _get_tasks_data():
 @tasks_bp.route('', methods=['GET'])
 def get_recent_tasks():
     """
-    Retrieves the statuses and metadata of the 50 most recent tasks.
+    Retrieves the statuses and metadata of the most recent tasks.
     """
-    tasks = _get_tasks_data()
+    limit = int(request.args.get('limit', 50))
+    tasks = _get_tasks_data(limit=limit)
     return jsonify(tasks), 200
 
 @tasks_bp.route('/stream', methods=['GET'])
@@ -124,9 +125,11 @@ def stream_tasks():
     """
     SSE endpoint to push task queue updates to the client in real-time.
     """
+    limit = int(request.args.get('limit', 50))
+    
     def generate():
         while True:
-            tasks = _get_tasks_data()
+            tasks = _get_tasks_data(limit=limit)
             yield f"data: {json.dumps(tasks)}\n\n"
             time.sleep(2)
             

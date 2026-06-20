@@ -1,59 +1,18 @@
-# Backend API & Worker Architecture
+# Backend Core (Flask & Celery)
 
-## Overview
-This directory contains the Python-based backend for the distributed task processing system. It leverages **Flask** for exposing RESTful API endpoints and **Celery** for asynchronous task execution, using **Redis** as both the message broker and state backend.
+This directory contains the Python core of the Asynchronous Task Queue System.
 
-## System Components
-1. **Flask API (`routes.py`, `__init__.py`)**
-   - Handles incoming HTTP requests.
-   - Dispatches long-running tasks to the Celery queue.
-   - Provides an endpoint to poll task states.
-   - CORS is enabled to allow frontend communication.
-2. **Celery Worker (`tasks.py`, `celery_utils.py`, `make_celery.py`)**
-   - Runs in a separate process/container.
-   - Listens to the Redis broker for incoming task messages.
-   - Executes `simulate_heavy_computation` asynchronously.
-3. **Redis Integration**
-   - Acts as the Celery Message Broker (stores tasks waiting to be processed).
-   - Acts as the Celery Result Backend (stores task completion states).
-   - Serves as a custom cache (`db=1`) to persist custom metadata (e.g., duration, start time) that Celery does not natively track in an easily queryable list.
+## Component Overview
 
-## API Reference
-The API is accessible at `http://localhost:5000` when running locally or via Docker.
+- `__init__.py`: The application factory. It initializes the Flask application, configures Cross-Origin Resource Sharing (CORS), and sets up the Celery integration.
+- `celery_utils.py`: Contains the `init_celery` utility function to bind the Celery worker process with the Flask application context.
+- `routes.py`: Defines all RESTful API endpoints:
+  - `POST /tasks`: Submit new workloads to the queue.
+  - `GET /tasks/stream`: The Server-Sent Events (SSE) stream yielding real-time queue states.
+  - `DELETE /tasks`: Flush the queue and revoke all executing tasks.
+- `tasks.py`: Defines the asynchronous background tasks (e.g., `simulate_heavy_computation`). 
 
-### 1. Submit a Task (`POST /tasks`)
-Triggers a new asynchronous background task.
-- **Payload:** `{"duration": 5}` (Optional. Default is 5).
-- **Response:**
-  ```json
-  {
-    "task_id": "uuid-string",
-    "status": "Accepted",
-    "message": "Task submitted to sleep for 5 seconds"
-  }
-  ```
+## Real-Time Metrics Tracking
 
-### 2. Retrieve All Tasks (`GET /tasks`)
-Fetches the 50 most recent tasks stored in the Redis cache and queries Celery for their live status.
-- **Response:**
-  ```json
-  [
-    {
-      "id": "uuid-string",
-      "status": "SUCCESS",
-      "startTime": "2026-06-20T12:00:00.000Z",
-      "duration": "5s",
-      "result": "{\"status\": \"success\", \"message\": \"Slept for 5 seconds\"}"
-    }
-  ]
-  ```
-
-### 3. Clear Queue (`DELETE /tasks`)
-Deletes the tracked history of tasks from the custom Redis cache (`db=1`). This clears the frontend UI but does not terminate executing Celery processes.
-
-## Running Locally (Without Docker)
-If you wish to test the backend outside of the Docker environment:
-1. Install dependencies: `pip install -r ../requirements.txt`
-2. Start a local Redis server on `localhost:6379`.
-3. Start the Flask server: `python run.py`
-4. Start the Celery worker (in a new terminal): `celery -A make_celery worker --loglevel=info`
+To provide 100% accurate global metrics without blocking API threads, the backend heavily utilizes **Redis (`db=1`)** and **Celery Signals**.
+Whenever a worker changes state, signals (`@task_prerun`, `@task_success`, `@task_failure`) automatically update tracking counters in Redis. The API then serves these numbers to the frontend dashboard.

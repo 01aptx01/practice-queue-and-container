@@ -30,6 +30,7 @@ type Metrics = {
 export default function Dashboard() {
   // Global Tasks State for the Table
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [limit, setLimit] = useState<number>(50);
   const [metrics, setMetrics] = useState<Metrics>({
     total_received: 0,
     total_success: 0,
@@ -48,7 +49,7 @@ export default function Dashboard() {
    */
   useEffect(() => {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
-    const eventSource = new EventSource(`${apiUrl}/tasks/stream`);
+    const eventSource = new EventSource(`${apiUrl}/tasks/stream?limit=${limit}`);
 
     eventSource.onopen = () => {
       setIsConnected(true);
@@ -78,7 +79,7 @@ export default function Dashboard() {
     return () => {
       eventSource.close(); // Cleanup on unmount
     };
-  }, []);
+  }, [limit]);
 
 
 
@@ -197,6 +198,28 @@ export default function Dashboard() {
         <div className="bg-[#161b22] border border-[#30363d] p-5 rounded">
           <div className="text-sm text-[#8b949e] mb-1 uppercase tracking-wider">Completed / Failed</div>
           <div className="text-3xl font-bold text-[#39d353]">{metrics.total_success} <span className="text-sm text-[#8b949e] font-normal mx-1">/</span> <span className="text-[#ff7b72]">{metrics.total_failed}</span></div>
+        </div>
+      </div>
+
+      {/* Data Table Controls */}
+      <div className="flex justify-between items-end mb-2">
+        <div className="text-sm text-[#8b949e]">
+          Showing latest <span className="text-white font-bold">{tasks.length}</span> items
+        </div>
+        <div className="flex items-center gap-2">
+          <label htmlFor="limit-select" className="text-xs font-bold text-[#8b949e] uppercase tracking-wide">History Limit:</label>
+          <select 
+            id="limit-select"
+            value={limit}
+            onChange={(e) => setLimit(Number(e.target.value))}
+            className="bg-[#161b22] border border-[#30363d] text-white text-sm rounded px-2 py-1 outline-none focus:border-[#58a6ff] transition-colors cursor-pointer"
+          >
+            <option value={10}>10</option>
+            <option value={50}>50</option>
+            <option value={100}>100</option>
+            <option value={200}>200</option>
+            <option value={500}>500</option>
+          </select>
         </div>
       </div>
 
