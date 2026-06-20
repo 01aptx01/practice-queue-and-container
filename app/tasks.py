@@ -4,7 +4,27 @@ Defines all asynchronous tasks that are executed by the Celery worker.
 """
 
 from celery import shared_task
+from celery.signals import task_prerun, task_success, task_failure
 import time
+import redis
+import os
+
+REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
+redis_client = redis.Redis(host=REDIS_HOST, port=6379, db=1, decode_responses=True)
+
+@task_prerun.connect
+def task_prerun_handler(sender=None, **kwargs):
+    redis_client.incr('metrics:active')
+
+@task_success.connect
+def task_success_handler(sender=None, **kwargs):
+    redis_client.incr('metrics:total_success')
+    redis_client.decr('metrics:active')
+
+@task_failure.connect
+def task_failure_handler(sender=None, **kwargs):
+    redis_client.incr('metrics:total_failed')
+    redis_client.decr('metrics:active')
 
 class TransientError(Exception):
     """Custom exception to simulate a transient failure that should be retried."""

@@ -18,9 +18,25 @@ type SortConfig = {
   direction: 'asc' | 'desc';
 };
 
+// Define global metrics structure
+type Metrics = {
+  total_received: number;
+  total_success: number;
+  total_failed: number;
+  active: number;
+  pending: number;
+};
+
 export default function Dashboard() {
   // Global Tasks State for the Table
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [metrics, setMetrics] = useState<Metrics>({
+    total_received: 0,
+    total_success: 0,
+    total_failed: 0,
+    active: 0,
+    pending: 0
+  });
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
   const [isConnected, setIsConnected] = useState<boolean>(false);
 
@@ -41,7 +57,12 @@ export default function Dashboard() {
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        setTasks(data);
+        if (data.metrics && data.tasks) {
+          setTasks(data.tasks);
+          setMetrics(data.metrics);
+        } else {
+          setTasks(Array.isArray(data) ? data : []);
+        }
       } catch (err) {
         console.error("Failed to parse SSE data", err);
       }
@@ -59,10 +80,7 @@ export default function Dashboard() {
     };
   }, []);
 
-  // Calculate dynamic metrics for the top cards
-  const activeCount = tasks.filter(t => t.status === "PENDING" || t.status === "STARTED" || t.status === "RETRY").length;
-  const successCount = tasks.filter(t => t.status === "SUCCESS").length;
-  const failedCount = tasks.filter(t => t.status === "FAILURE").length;
+
 
   /**
    * Sends a DELETE request to flush the task queue from Redis,
@@ -163,18 +181,22 @@ export default function Dashboard() {
       )}
 
       {/* Metrics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <div className="bg-[#161b22] border border-[#30363d] p-5 rounded">
-          <div className="text-sm text-[#8b949e] mb-1 uppercase tracking-wider">Pending Tasks</div>
-          <div className="text-3xl font-bold text-[#f2cc60]">{activeCount}</div>
+          <div className="text-sm text-[#8b949e] mb-1 uppercase tracking-wider">Total Received</div>
+          <div className="text-3xl font-bold text-white">{metrics.total_received}</div>
         </div>
         <div className="bg-[#161b22] border border-[#30363d] p-5 rounded">
-          <div className="text-sm text-[#8b949e] mb-1 uppercase tracking-wider">Successful Tasks</div>
-          <div className="text-3xl font-bold text-[#39d353]">{successCount}</div>
+          <div className="text-sm text-[#8b949e] mb-1 uppercase tracking-wider">Pending</div>
+          <div className="text-3xl font-bold text-[#f2cc60]">{metrics.pending}</div>
         </div>
         <div className="bg-[#161b22] border border-[#30363d] p-5 rounded">
-          <div className="text-sm text-[#8b949e] mb-1 uppercase tracking-wider">Failed Tasks</div>
-          <div className="text-3xl font-bold text-[#ff7b72]">{failedCount}</div>
+          <div className="text-sm text-[#8b949e] mb-1 uppercase tracking-wider">Active (Processing)</div>
+          <div className="text-3xl font-bold text-[#58a6ff]">{metrics.active}</div>
+        </div>
+        <div className="bg-[#161b22] border border-[#30363d] p-5 rounded">
+          <div className="text-sm text-[#8b949e] mb-1 uppercase tracking-wider">Completed / Failed</div>
+          <div className="text-3xl font-bold text-[#39d353]">{metrics.total_success} <span className="text-sm text-[#8b949e] font-normal mx-1">/</span> <span className="text-[#ff7b72]">{metrics.total_failed}</span></div>
         </div>
       </div>
 

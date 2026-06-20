@@ -18,6 +18,7 @@ tasks_bp = Blueprint('tasks', __name__, url_prefix='/tasks')
 # We use db=1 to avoid conflicting with Celery's default broker which uses db=0.
 REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
 redis_client = redis.Redis(host=REDIS_HOST, port=6379, db=1, decode_responses=True)
+redis_client_celery = redis.Redis(host=REDIS_HOST, port=6379, db=0, decode_responses=True)
 
 @tasks_bp.route('', methods=['POST'])
 def submit_task():
@@ -39,6 +40,9 @@ def submit_task():
         "duration": f"{duration}s", 
         "start_time": datetime.datetime.now().isoformat()
     })
+    
+    # Increment global received counter
+    redis_client.incr('metrics:total_received')
     
     return jsonify({
         "task_id": task.id,
@@ -79,7 +83,33 @@ def _get_tasks_data():
             "duration": meta.get("duration", "-"),
             "result": payload
         })
-    return tasks
+        
+    # Fetch global metrics
+    total_received = int(redis_client.get('metrics:total_received') or 0)
+    total_success = int(redis_client.get('metrics:total_success') or 0)
+    total_failed = int(redis_client.get('metrics:total_failed') or 0)
+    active = int(redis_client.get('metrics:active') or 0)
+    
+    # Negative active tasks can happen if queue was cleared while tasks were running. Fix it.
+    if active < 0:
+        redis_client.set('metrics:active', 0)
+        active = 0
+        
+    # Calculate pending mathematically to account for tasks prefetched into worker memory
+    # Total = Pending + Active + Success + Failed
+    # Pending = Total - Active - Success - Failed
+    pending = max(0, total_received - active - total_success - total_failed)
+    
+    return {
+        "metrics": {
+            "total_received": total_received,
+            "total_success": total_success,
+            "total_failed": total_failed,
+            "active": active,
+            "pending": pending
+        },
+        "tasks": tasks
+    }
 
 @tasks_bp.route('', methods=['GET'])
 def get_recent_tasks():
@@ -122,5 +152,11 @@ def clear_tasks():
         
     # Remove the tracking list itself
     redis_client.delete('recent_tasks')
+    
+    # Reset all metrics
+    redis_client.set('metrics:total_received', 0)
+    redis_client.set('metrics:total_success', 0)
+    redis_client.set('metrics:total_failed', 0)
+    redis_client.set('metrics:active', 0)
     
     return jsonify({"status": "success", "message": "All task tracking records cleared and tasks revoked"}), 200
