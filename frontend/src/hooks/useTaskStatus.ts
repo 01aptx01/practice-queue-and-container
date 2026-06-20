@@ -29,18 +29,15 @@ export function useTaskStatus(): UseTaskStatusResult {
   const pollStatus = useCallback(async (id: string) => {
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
-      // We poll the global tasks endpoint to find our specific task state
-      const res = await fetch(`${apiUrl}/tasks`);
+      // We poll the specific task endpoint to find our specific task state
+      const res = await fetch(`${apiUrl}/tasks/${id}`);
       
       if (!res.ok) throw new Error('Failed to fetch task status');
       
       const data = await res.json();
+      const task = data;
       
-      // Handle both new API structure {metrics, tasks} and old structure []
-      const tasksList = Array.isArray(data) ? data : (data.tasks || []);
-      const task = tasksList.find((t: any) => t.id === id);
-      
-      if (!task) return; // Task might not be registered yet or was cleared
+      if (!task || !task.id) return; // Task might not be registered yet or was cleared
 
       if (task.status === 'SUCCESS') {
         setStatus('success');

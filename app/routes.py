@@ -52,6 +52,13 @@ def submit_task():
         "message": f"Task submitted to sleep for {duration} seconds"
     }), 202
 
+def _parse_limit(req, default=50):
+    """Helper to safely parse limit parameter."""
+    try:
+        return int(req.args.get('limit', default))
+    except (ValueError, TypeError):
+        return default
+
 def _get_tasks_data(limit=50):
     """Helper function to fetch and format task data optimally."""
     task_ids = redis_client.lrange('recent_tasks', 0, limit - 1)
@@ -123,16 +130,50 @@ def get_recent_tasks():
     """
     Retrieves the statuses and metadata of the most recent tasks.
     """
-    limit = int(request.args.get('limit', 50))
+    limit = _parse_limit(request)
     tasks = _get_tasks_data(limit=limit)
     return jsonify(tasks), 200
+
+@tasks_bp.route('/<task_id>', methods=['GET'])
+def get_task_status(task_id):
+    """
+    Retrieves the status of a specific task directly.
+    """
+    meta = redis_client.hgetall(f'task_meta:{task_id}') or {}
+    raw_celery = redis_client_celery.get(f'celery-task-meta-{task_id}')
+    
+    if raw_celery:
+        celery_data = json.loads(raw_celery)
+        status = celery_data.get('status', 'PENDING')
+        
+        payload = "-"
+        raw_result = celery_data.get('result')
+        if status in ['SUCCESS', 'FAILURE'] and raw_result is not None:
+            try:
+                if isinstance(raw_result, dict):
+                    payload = json.dumps(raw_result)
+                else:
+                    payload = str(raw_result)
+            except Exception:
+                payload = str(raw_result)
+    else:
+        status = 'PENDING'
+        payload = "-"
+            
+    return jsonify({
+        "id": task_id,
+        "status": status,
+        "startTime": meta.get("start_time", datetime.datetime.now().isoformat()),
+        "duration": meta.get("duration", "-"),
+        "result": payload
+    }), 200
 
 @tasks_bp.route('/stream', methods=['GET'])
 def stream_tasks():
     """
     SSE endpoint to push task queue updates to the client in real-time.
     """
-    limit = int(request.args.get('limit', 50))
+    limit = _parse_limit(request)
     
     def generate():
         while True:
@@ -154,11 +195,14 @@ def clear_tasks():
     # Get celery app instance
     celery_app = current_app.extensions["celery"]
     
-    # Remove metadata keys and revoke tasks
-    for task_id in task_ids:
-        # Revoke the task (terminate if already running)
-        celery_app.control.revoke(task_id, terminate=True)
-        redis_client.delete(f'task_meta:{task_id}')
+    # Remove metadata keys and revoke tasks in bulk
+    if task_ids:
+        # Revoke all tasks in a single broadcast command
+        celery_app.control.revoke(task_ids, terminate=True)
+        # Delete task_meta keys in chunks of 1000 to avoid locking Redis
+        for i in range(0, len(task_ids), 1000):
+            chunk = task_ids[i:i + 1000]
+            redis_client.delete(*[f'task_meta:{t}' for t in chunk])
         
     # Remove the tracking list itself
     redis_client.delete('recent_tasks')
