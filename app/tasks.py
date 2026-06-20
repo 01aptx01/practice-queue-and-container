@@ -12,19 +12,31 @@ import os
 REDIS_HOST = os.environ.get('REDIS_HOST', 'redis')
 redis_client = redis.Redis(host=REDIS_HOST, port=6379, db=1, decode_responses=True)
 
+from celery.signals import task_prerun, task_success, task_failure, task_revoked
+
 @task_prerun.connect
-def task_prerun_handler(sender=None, **kwargs):
-    redis_client.incr('metrics:active')
+def task_prerun_handler(sender=None, task_id=None, **kwargs):
+    if task_id:
+        redis_client.sadd('metrics:active_tasks', task_id)
 
 @task_success.connect
 def task_success_handler(sender=None, **kwargs):
+    task_id = sender.request.id if sender and hasattr(sender, 'request') else None
+    if task_id:
+        redis_client.srem('metrics:active_tasks', task_id)
     redis_client.incr('metrics:total_success')
-    redis_client.decr('metrics:active')
 
 @task_failure.connect
-def task_failure_handler(sender=None, **kwargs):
+def task_failure_handler(sender=None, task_id=None, **kwargs):
+    if task_id:
+        redis_client.srem('metrics:active_tasks', task_id)
     redis_client.incr('metrics:total_failed')
-    redis_client.decr('metrics:active')
+
+@task_revoked.connect
+def task_revoked_handler(sender=None, request=None, **kwargs):
+    task_id = request.id if request else None
+    if task_id:
+        redis_client.srem('metrics:active_tasks', task_id)
 
 class TransientError(Exception):
     """Custom exception to simulate a transient failure that should be retried."""

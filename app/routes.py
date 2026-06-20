@@ -34,12 +34,14 @@ def submit_task():
     
     # Save the task ID to a custom Redis list for tracking recent tasks
     redis_client.lpush('recent_tasks', task.id)
+    redis_client.ltrim('recent_tasks', 0, 9999)
     
     # Store metadata (duration, start time) associated with this task ID
     redis_client.hset(f'task_meta:{task.id}', mapping={
         "duration": f"{duration}s", 
         "start_time": datetime.datetime.now().isoformat()
     })
+    redis_client.expire(f'task_meta:{task.id}', 86400)
     
     # Increment global received counter
     redis_client.incr('metrics:total_received')
@@ -58,23 +60,33 @@ def _get_tasks_data(limit=50):
         
     # Use pipeline to batch hgetall queries
     pipeline = redis_client.pipeline()
+    celery_pipeline = redis_client_celery.pipeline()
     for task_id in task_ids:
         pipeline.hgetall(f'task_meta:{task_id}')
+        celery_pipeline.get(f'celery-task-meta-{task_id}')
     meta_results = pipeline.execute()
+    celery_raw_results = celery_pipeline.execute()
     
     tasks = []
-    for task_id, meta in zip(task_ids, meta_results):
-        # Retrieve the current state from Celery's result backend
-        result = AsyncResult(task_id)
-        status = result.state
-        
-        # Parse the result payload safely
-        payload = "-"
-        if result.ready() and result.result:
-            try:
-                payload = json.dumps(result.result)
-            except Exception:
-                payload = str(result.result)
+    for task_id, meta, raw_celery in zip(task_ids, meta_results, celery_raw_results):
+        if raw_celery:
+            celery_data = json.loads(raw_celery)
+            status = celery_data.get('status', 'PENDING')
+            
+            # Parse the result payload safely
+            payload = "-"
+            raw_result = celery_data.get('result')
+            if status in ['SUCCESS', 'FAILURE'] and raw_result is not None:
+                try:
+                    if isinstance(raw_result, dict):
+                        payload = json.dumps(raw_result)
+                    else:
+                        payload = str(raw_result)
+                except Exception:
+                    payload = str(raw_result)
+        else:
+            status = 'PENDING'
+            payload = "-"
                 
         tasks.append({
             "id": task_id,
@@ -88,12 +100,7 @@ def _get_tasks_data(limit=50):
     total_received = int(redis_client.get('metrics:total_received') or 0)
     total_success = int(redis_client.get('metrics:total_success') or 0)
     total_failed = int(redis_client.get('metrics:total_failed') or 0)
-    active = int(redis_client.get('metrics:active') or 0)
-    
-    # Negative active tasks can happen if queue was cleared while tasks were running. Fix it.
-    if active < 0:
-        redis_client.set('metrics:active', 0)
-        active = 0
+    active = redis_client.scard('metrics:active_tasks')
         
     # Calculate pending mathematically to account for tasks prefetched into worker memory
     # Total = Pending + Active + Success + Failed
@@ -160,6 +167,6 @@ def clear_tasks():
     redis_client.set('metrics:total_received', 0)
     redis_client.set('metrics:total_success', 0)
     redis_client.set('metrics:total_failed', 0)
-    redis_client.set('metrics:active', 0)
+    redis_client.delete('metrics:active_tasks')
     
     return jsonify({"status": "success", "message": "All task tracking records cleared and tasks revoked"}), 200
