@@ -32,6 +32,7 @@ class TransientError(Exception):
 
 @shared_task(bind=True, 
     ignore_result=False, 
+    track_started=True,
     autoretry_for=(TransientError,),
     retry_kwargs={'max_retries': 3, 'countdown': 5}
 )

@@ -35,7 +35,10 @@ export function useTaskStatus(): UseTaskStatusResult {
       if (!res.ok) throw new Error('Failed to fetch task status');
       
       const data = await res.json();
-      const task = data.find((t: any) => t.id === id);
+      
+      // Handle both new API structure {metrics, tasks} and old structure []
+      const tasksList = Array.isArray(data) ? data : (data.tasks || []);
+      const task = tasksList.find((t: any) => t.id === id);
       
       if (!task) return; // Task might not be registered yet or was cleared
 
